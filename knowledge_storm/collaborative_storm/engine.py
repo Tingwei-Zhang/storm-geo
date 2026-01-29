@@ -1,24 +1,21 @@
-import dspy
 import os
-from dataclasses import dataclass, field, asdict
-from typing import List, Union, Literal, Optional, Dict
+from dataclasses import asdict, dataclass, field
+from typing import Dict, List, Literal, Optional, Union
 
-from .modules import collaborative_storm_utils as collaborative_storm_utils
-from .modules.callback import BaseCallbackHandler
-from .modules.co_storm_agents import (
-    SimulatedUser,
-    PureRAGAgent,
-    Moderator,
-    CoStormExpert,
-)
-from .modules.expert_generation import GenerateExpertModule
-from .modules.warmstart_hierarchical_chat import WarmStartModule
+import dspy
+
 from ..dataclass import ConversationTurn, KnowledgeBase
 from ..encoder import Encoder
-from ..interface import LMConfigs, Agent
-from ..logging_wrapper import LoggingWrapper
+from ..interface import Agent, LMConfigs
 from ..lm import LitellmModel
-from ..rm import BingSearch
+from ..logging_wrapper import LoggingWrapper
+from ..rm import GoogleSearch, LoggingRetriever
+from .modules import collaborative_storm_utils as collaborative_storm_utils
+from .modules.callback import BaseCallbackHandler
+from .modules.co_storm_agents import (CoStormExpert, Moderator, PureRAGAgent,
+                                      SimulatedUser)
+from .modules.expert_generation import GenerateExpertModule
+from .modules.warmstart_hierarchical_chat import WarmStartModule
 
 
 class CollaborativeStormLMConfigs(LMConfigs):
@@ -516,7 +513,8 @@ class CoStormRunner:
         self.logging_wrapper = logging_wrapper
         self.callback_handler = callback_handler
         if rm is None:
-            self.rm = BingSearch(k=runner_argument.retrieve_top_k)
+            base_rm = GoogleSearch(k=runner_argument.retrieve_top_k)
+            self.rm = LoggingRetriever(base_rm, logging_wrapper)
         else:
             self.rm = rm
         self.encoder = Encoder()

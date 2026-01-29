@@ -15,28 +15,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from knowledge_storm.collaborative_storm.engine import (
-    CollaborativeStormLMConfigs,
-    RunnerArgument,
-    CoStormRunner,
-)
-from knowledge_storm.collaborative_storm.modules.callback import (
-    LocalConsolePrintCallBackHandler,
-)
-from knowledge_storm.interface import Information
-from knowledge_storm.lm import OpenAIModel, AzureOpenAIModel
-from knowledge_storm.logging_wrapper import LoggingWrapper
-from knowledge_storm.rm import (
-    BingSearch,
-    BraveRM,
-    DuckDuckGoSearchRM,
-    SerperRM,
-    TavilySearchRM,
-    YouRM,
-    SearXNG,
-)
-from knowledge_storm.utils import load_api_key
 from manual_document_helper import create_information_from_dict
+
+from knowledge_storm.collaborative_storm.engine import (
+    CollaborativeStormLMConfigs, CoStormRunner, RunnerArgument)
+from knowledge_storm.collaborative_storm.modules.callback import \
+    LocalConsolePrintCallBackHandler
+from knowledge_storm.interface import Information
+from knowledge_storm.lm import AzureOpenAIModel, OpenAIModel
+from knowledge_storm.logging_wrapper import LoggingWrapper
+from knowledge_storm.rm import (BingSearch, BraveRM, DuckDuckGoSearchRM,
+                                GoogleSearch, LoggingRetriever, SearXNG,
+                                SerperRM, TavilySearchRM, YouRM)
+from knowledge_storm.utils import load_api_key
 
 
 class FirstRetrievalInjector:
@@ -170,10 +161,16 @@ def configure_models():
     return lm_config
 
 
-def build_retriever(args, runner_argument, manual_docs: List[Information]):
-    # Default retriever from the original demo
-    args.retriever = args.retriever or "serper"
+def build_retriever(args, runner_argument, manual_docs: List[Information], logging_wrapper=None):
+    # Default retriever: Google Custom Search
+    args.retriever = args.retriever or "google"
     match args.retriever:
+        case "google":
+            base_rm = GoogleSearch(
+                google_search_api_key=os.getenv("GOOGLE_SEARCH_API_KEY"),
+                google_cse_id=os.getenv("GOOGLE_CSE_ID"),
+                k=runner_argument.retrieve_top_k,
+            )
         case "bing":
             base_rm = BingSearch(
                 bing_search_api=os.getenv("BING_SEARCH_API_KEY"),
@@ -213,10 +210,13 @@ def build_retriever(args, runner_argument, manual_docs: List[Information]):
             raise ValueError(
                 f'Invalid retriever: {args.retriever}. '
                 'Choose from "bing", "you", "brave", "duckduckgo", '
-                '"serper", "tavily", or "searxng".'
+                '"serper", "tavily", "searxng", or "google".'
             )
 
-    return FirstRetrievalInjector(base_rm, manual_docs)
+    injector = FirstRetrievalInjector(base_rm, manual_docs)
+    if logging_wrapper is not None:
+        return LoggingRetriever(injector, logging_wrapper)
+    return injector
 
 
 def main(args):
@@ -246,7 +246,7 @@ def main(args):
 
     manual_doc_path = Path(args.manual_doc_path).expanduser().resolve()
     manual_docs = load_manual_documents(manual_doc_path)
-    retriever = build_retriever(args, runner_argument, manual_docs)
+    retriever = build_retriever(args, runner_argument, manual_docs, logging_wrapper)
 
     costorm_runner = CoStormRunner(
         lm_config=lm_config,
@@ -310,8 +310,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--retriever",
         type=str,
-        choices=["bing", "you", "brave", "serper", "duckduckgo", "tavily", "searxng"],
-        help="Search API to use (defaults to serper).",
+        choices=["bing", "you", "brave", "serper", "duckduckgo", "tavily", "searxng", "google"],
+        help="Search API to use (defaults to google).",
     )
     parser.add_argument(
         "--manual-doc-path",

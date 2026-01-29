@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Callable, Union, List
+from typing import Callable, List, Union
 
 import backoff
 import dspy
@@ -1103,6 +1103,45 @@ class GoogleSearch(dspy.Retrieve):
             collected_results.append(r)
 
         return collected_results
+
+
+class LoggingRetriever(dspy.Retrieve):
+    """Wraps a dspy.Retrieve (e.g. GoogleSearch) and logs every query and result URLs, titles, descriptions, and snippets to a LoggingWrapper."""
+
+    def __init__(self, retriever: dspy.Retrieve, logging_wrapper=None):
+        super().__init__(k=getattr(retriever, "k", 3))
+        self._retriever = retriever
+        self.logging_wrapper = logging_wrapper
+
+    def get_usage_and_reset(self):
+        if hasattr(self._retriever, "get_usage_and_reset"):
+            return self._retriever.get_usage_and_reset()
+        return {}
+
+    def forward(
+        self, query_or_queries: Union[str, List[str]], exclude_urls: List[str] = []
+    ):
+        queries = (
+            [query_or_queries]
+            if isinstance(query_or_queries, str)
+            else query_or_queries
+        )
+        results = self._retriever(
+            query_or_queries=query_or_queries, exclude_urls=exclude_urls
+        )
+        if self.logging_wrapper is not None:
+            result_urls = [r.get("url", "") for r in results]
+            result_titles = [r.get("title", "") for r in results]
+            result_descriptions = [r.get("description", "") for r in results]
+            result_snippets = [r.get("snippets", []) for r in results]
+            self.logging_wrapper.log_retriever_query(
+                queries=queries,
+                result_urls=result_urls,
+                result_titles=result_titles,
+                result_descriptions=result_descriptions,
+                result_snippets=result_snippets,
+            )
+        return results
 
 
 class AzureAISearch(dspy.Retrieve):

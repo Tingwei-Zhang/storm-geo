@@ -1,10 +1,11 @@
-from contextlib import contextmanager
 import time
-import pytz
+from contextlib import contextmanager
 from datetime import datetime
 
-# Define California timezone
-CALIFORNIA_TZ = pytz.timezone("America/Los_Angeles")
+import pytz
+
+# Define timezone
+TZ = pytz.timezone("America/New_York")
 
 
 class EventLog:
@@ -32,7 +33,7 @@ class EventLog:
     def get_start_time(self):
         if self.start_time:
             # Format to milliseconds
-            return self.start_time.astimezone(CALIFORNIA_TZ).strftime(
+            return self.start_time.astimezone(TZ).strftime(
                 "%Y-%m-%d %H:%M:%S.%f"
             )[:-3]
         return None
@@ -40,7 +41,7 @@ class EventLog:
     def get_end_time(self):
         if self.end_time:
             # Format to milliseconds
-            return self.end_time.astimezone(CALIFORNIA_TZ).strftime(
+            return self.end_time.astimezone(TZ).strftime(
                 "%Y-%m-%d %H:%M:%S.%f"
             )[:-3]
         return None
@@ -72,6 +73,7 @@ class LoggingWrapper:
             "lm_usage": {},
             "lm_history": [],
             "query_count": 0,
+            "retriever_queries": [],
         }
         self.pipeline_stage_active = True
 
@@ -160,6 +162,31 @@ class LoggingWrapper:
 
         self.logging_dict[self.current_pipeline_stage]["query_count"] += count
 
+    def log_retriever_query(
+        self,
+        queries: list,
+        result_urls: list,
+        result_titles: list = None,
+        result_descriptions: list = None,
+        result_snippets: list = None,
+    ):
+        """Append a retriever (e.g. Google Search) query and its results to the current pipeline stage log.
+        Each optional list is one entry per result (same order as result_urls).
+        result_snippets: list of list of str (each result's snippet chunks).
+        """
+        if not self.pipeline_stage_active:
+            return
+        entry = {"queries": queries, "result_urls": result_urls}
+        if result_titles is not None:
+            entry["result_titles"] = result_titles
+        if result_descriptions is not None:
+            entry["result_descriptions"] = result_descriptions
+        if result_snippets is not None:
+            entry["result_snippets"] = result_snippets
+        self.logging_dict[self.current_pipeline_stage]["retriever_queries"].append(
+            entry
+        )
+
     @contextmanager
     def log_event(self, event_name):
         if not self.pipeline_stage_active:
@@ -206,6 +233,7 @@ class LoggingWrapper:
                 "lm_history": pipeline_log["lm_history"],
                 "query_count": pipeline_log["query_count"],
                 "total_wall_time": pipeline_log["total_wall_time"],
+                "retriever_queries": pipeline_log.get("retriever_queries", []),
             }
         if reset_logging:
             self.logging_dict.clear()
