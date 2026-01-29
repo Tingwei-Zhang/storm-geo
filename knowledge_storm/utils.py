@@ -1,18 +1,18 @@
 import concurrent.futures
-import dspy
-import httpx
 import json
 import logging
 import os
 import pickle
 import re
-import regex
 import sys
-import toml
-from typing import List, Dict
-from tqdm import tqdm
+from typing import Dict, List
 
+import dspy
+import httpx
+import regex
+import toml
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from tqdm import tqdm
 from trafilatura import extract
 
 from .lm import LitellmModel
@@ -648,7 +648,16 @@ class WebPageHelper:
             snippet_chunk_size: Maximum character count for each snippet.
             max_thread_num: Maximum number of threads to use for concurrent requests (e.g., downloading webpages).
         """
-        self.httpx_client = httpx.Client(verify=False)
+        # Browser-like headers to reduce 403 blocks from sites that reject default HTTP client UA
+        self._default_headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        self.httpx_client = httpx.Client(verify=False, headers=self._default_headers)
         self.min_char_count = min_char_count
         self.max_thread_num = max_thread_num
         self.text_splitter = RecursiveCharacterTextSplitter(

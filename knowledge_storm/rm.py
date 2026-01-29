@@ -1097,9 +1097,14 @@ class GoogleSearch(dspy.Retrieve):
             list(url_to_results.keys())
         )
         collected_results = []
-        for url in valid_url_to_snippets:
-            r = url_to_results[url]
-            r["snippets"] = valid_url_to_snippets[url]["snippets"]
+        for url in url_to_results:
+            r = url_to_results[url].copy()
+            if url in valid_url_to_snippets:
+                r["snippets"] = valid_url_to_snippets[url]["snippets"]
+            else:
+                # Page fetch failed (e.g. 403); keep result using search description as snippet
+                desc = r.get("description", "") or ""
+                r["snippets"] = [desc] if desc.strip() else []
             collected_results.append(r)
 
         return collected_results

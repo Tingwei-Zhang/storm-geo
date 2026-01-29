@@ -7,7 +7,7 @@ trafilatura
 langchain-huggingface
 qdrant-client
 langchain-qdrant
-numpy
+numpy<2
 litellm
 diskcache
 google-api-python-client
