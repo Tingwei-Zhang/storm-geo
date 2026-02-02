@@ -5,6 +5,6 @@ repos:
       - id: black
         name: Format Python code with black
         entry: black
-        args: ["knowledge_storm/"]
+        args: ["--line-length", "120", "knowledge_storm/"]
         language: python
         pass_filenames: true
