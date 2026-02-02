@@ -1,0 +1,57 @@
+{
+  "jobDefinitionName": "storm-geo-batch-chunk",
+  "type": "container",
+  "containerProperties": {
+    "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/storm-geo-batch:latest",
+    "environment": [
+      {
+        "name": "OPENAI_API_TYPE",
+        "value": "openai"
+      },
+      {
+        "name": "ENCODER_API_TYPE",
+        "value": "openai"
+      },
+      {
+        "name": "PYTHONPATH",
+        "value": "/app"
+      },
+      {
+        "name": "BATCH_MANIFEST_S3",
+        "value": "s3://<BUCKET>/batch/manifest.csv"
+      },
+      {
+        "name": "BATCH_RESULTS_BUCKET",
+        "value": "<BUCKET>"
+      },
+      {
+        "name": "BATCH_CHUNK_SIZE",
+        "value": "100"
+      }
+    ],
+    "secrets": [
+      {
+        "name": "STORM_GEO_SECRETS_JSON",
+        "valueFrom": "<SECRET_ARN>"
+      }
+    ],
+    "jobRoleArn": "<JOB_ROLE_ARN>",
+    "executionRoleArn": "<EXECUTION_ROLE_ARN>",
+    "resourceRequirements": [
+      {
+        "type": "VCPU",
+        "value": "2"
+      },
+      {
+        "type": "MEMORY",
+        "value": "16384"
+      }
+    ],
+    "networkConfiguration": {
+      "assignPublicIp": "ENABLED"
+    }
+  },
+  "platformCapabilities": [
+    "FARGATE"
+  ]
+}

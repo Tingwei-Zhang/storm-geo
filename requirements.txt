@@ -11,3 +11,5 @@ numpy<2
 litellm
 diskcache
 google-api-python-client
+pre-commit
+boto3

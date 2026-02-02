@@ -1,0 +1,34 @@
+# Docker image for AWS Batch Co-STORM chunk jobs.
+# Build from project root: docker build -f infra/Dockerfile.batch -t storm-geo-batch .
+# Run chunk: python -m examples.batch.run_chunk --manifest-s3 ... --chunk-id $AWS_BATCH_JOB_ARRAY_INDEX --output-dir /results [--upload-s3 ...]
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system deps if needed (e.g. for sentence-transformers / numpy)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project (README.md required by setup.py for long_description)
+COPY requirements.txt setup.py MANIFEST.in README.md ./
+COPY knowledge_storm ./knowledge_storm
+COPY examples ./examples
+COPY infra/batch_entrypoint.sh /app/batch_entrypoint.sh
+COPY infra/parse_secrets_and_run.py /app/parse_secrets_and_run.py
+RUN chmod +x /app/batch_entrypoint.sh
+
+# Batch needs boto3 for S3 manifest/results
+RUN pip install --no-cache-dir boto3
+
+# Pin PyTorch to CPU build so sentence-transformers (etc.) do not pull CUDA
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# Install storm-geo and dependencies
+RUN pip install --no-cache-dir -e .
+
+# If STORM_GEO_SECRETS_JSON is set (from Secrets Manager), parse it into OPENAI_API_KEY, GOOGLE_*, etc., then run batch_entrypoint.sh.
+ENV PYTHONPATH=/app
+WORKDIR /app
+ENTRYPOINT ["python", "/app/parse_secrets_and_run.py"]

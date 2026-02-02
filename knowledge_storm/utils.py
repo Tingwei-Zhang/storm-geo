@@ -39,12 +39,12 @@ def truncate_filename(filename, max_length=125):
 
 
 def load_api_key(toml_file_path):
+    """Load API keys from a TOML file into os.environ. If file is missing, do nothing (caller may rely on env vars)."""
+    if not os.path.isfile(toml_file_path):
+        return
     try:
         with open(toml_file_path, "r") as file:
             data = toml.load(file)
-    except FileNotFoundError:
-        print(f"File not found: {toml_file_path}", file=sys.stderr)
-        return
     except toml.TomlDecodeError:
         print(f"Error decoding TOML file: {toml_file_path}", file=sys.stderr)
         return
