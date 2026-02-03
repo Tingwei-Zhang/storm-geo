@@ -1,0 +1,5 @@
+# Dev / test dependencies for batch tests
+# Run with: pip install -r requirements.txt -r requirements-dev.txt
+# The project requires dspy_ai==2.4.9 (from requirements.txt). Newer dspy 3.x has an incompatible API (e.g. dspy.dsp.LM).
+pytest
+moto[s3]

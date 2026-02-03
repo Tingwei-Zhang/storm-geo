@@ -10,3 +10,8 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["moto: tests that use moto for S3 mocking (deselect with -m 'not moto')"]

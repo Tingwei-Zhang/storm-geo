@@ -291,6 +291,81 @@ aws batch submit-job \
   --region "$REGION"
 ```
 
+### Test in the cloud: copy-paste commands
+
+Use the same `REGION` and (if you use one) `AWS_PROFILE` as in your job definition. Replace `YOUR_BUCKET` and `your-job-queue` with your S3 bucket and Batch job queue name.
+
+**One-time: confirm AWS and upload manifest**
+
+```bash
+export REGION=us-east-2
+export AWS_PROFILE=your-profile   # optional; omit to use default credentials
+
+aws sts get-caller-identity --region "$REGION"
+
+aws s3 cp manifest.csv s3://YOUR_BUCKET/batch/manifest.csv --region "$REGION"
+```
+
+**Run a single job (one chunk, good for testing)**
+
+```bash
+aws batch submit-job \
+  --job-name storm-geo-test-$(date +%s) \
+  --job-queue your-job-queue \
+  --job-definition storm-geo-batch-chunk \
+  --region "$REGION"
+```
+
+Save the returned `jobId` to check status and logs.
+
+**Run an array (many chunks in parallel)**
+
+```bash
+aws batch submit-job \
+  --job-name storm-geo-array-$(date +%s) \
+  --job-queue your-job-queue \
+  --job-definition storm-geo-batch-chunk \
+  --array-properties size=5 \
+  --region "$REGION"
+```
+
+**Inspect jobs and results**
+
+```bash
+aws batch list-jobs --job-queue your-job-queue --job-status RUNNING --region "$REGION"
+aws batch list-jobs --job-queue your-job-queue --job-status SUCCEEDED --region "$REGION"
+
+aws batch describe-jobs --jobs JOB_ID --region "$REGION"
+
+aws s3 ls s3://YOUR_BUCKET/batch/results/ --region "$REGION"
+aws s3 ls s3://YOUR_BUCKET/batch/results/chunk-0/ --region "$REGION"
+```
+
+**View logs (CloudWatch)**
+
+From `describe-jobs` output, use the job’s `container.logStreamName` (and the log group from your compute environment, often `/aws/batch/job`):
+
+```bash
+aws logs get-log-events \
+  --log-group-name /aws/batch/job \
+  --log-stream-name "LOG_STREAM_NAME_FROM_DESCRIBE_JOBS" \
+  --region "$REGION"
+```
+
+Or in the console: Batch → Jobs → job name → Log stream.
+
+**If something isn’t set up**
+
+- **Job queue name** – List queues: `aws batch describe-job-queues --region "$REGION" --query 'jobQueues[*].jobQueueName'`
+- **ECR and image** – Build and push so the job definition’s image URI exists:
+  ```bash
+  docker build -f infra/Dockerfile.batch -t storm-geo-batch .
+  aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com
+  docker tag storm-geo-batch:latest ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/storm-geo-batch:latest
+  docker push ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/storm-geo-batch:latest
+  ```
+- **Secret** – The job definition references a Secrets Manager secret (e.g. `storm-geo-secrets`). Ensure that secret exists in the same region and contains the keys your app expects (e.g. `OPENAI_API_KEY`, `GOOGLE_SEARCH_API_KEY`, `GOOGLE_CSE_ID`).
+
 ### Private subnets: VPC endpoints (no NAT, no public IP)
 
 If your Fargate compute environment uses **private subnets**, tasks need a path to Secrets Manager and ECR. Use VPC endpoints so traffic stays inside AWS.
