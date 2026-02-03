@@ -1,6 +1,9 @@
 #!/bin/sh
 # AWS Batch entrypoint: run one chunk using AWS_BATCH_JOB_ARRAY_INDEX.
 # Set env: BATCH_MANIFEST_S3, BATCH_RESULTS_BUCKET, BATCH_CHUNK_SIZE (default 100).
+# Results go to s3://BUCKET/batch/results/<run-id>/chunk-<index>/ so each submitted job
+# gets its own subfolder. Run ID is BATCH_RUN_PREFIX (if set) or AWS_BATCH_JOB_ID with
+# ":array-index" stripped for array jobs.
 
 CHUNK_ID="${AWS_BATCH_JOB_ARRAY_INDEX:-0}"
 CHUNK_SIZE="${BATCH_CHUNK_SIZE:-100}"
@@ -11,7 +14,13 @@ if [ -z "$BATCH_MANIFEST_S3" ] || [ -z "$BATCH_RESULTS_BUCKET" ]; then
   exit 1
 fi
 
-UPLOAD_S3="s3://${BATCH_RESULTS_BUCKET}/batch/results/chunk-${CHUNK_ID}/"
+# Unique subfolder per job: BATCH_RUN_PREFIX (optional override) or job ID (strip :index for array jobs)
+if [ -n "$BATCH_RUN_PREFIX" ]; then
+  RUN_ID="$BATCH_RUN_PREFIX"
+else
+  RUN_ID="${AWS_BATCH_JOB_ID%%:*}"
+fi
+UPLOAD_S3="s3://${BATCH_RESULTS_BUCKET}/batch/results/${RUN_ID}/chunk-${CHUNK_ID}/"
 
 exec python -m examples.batch.run_chunk \
   --manifest-s3 "$BATCH_MANIFEST_S3" \

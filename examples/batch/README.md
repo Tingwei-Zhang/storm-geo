@@ -150,7 +150,7 @@ export REGION=us-east-2
 
 **1. Note account ID and region** – Top-right in Console: Account ID (12 digits), region (e.g. us-east-2).
 
-**2. Create S3 bucket** – S3 → Create bucket. Name (e.g. `storm-geo-batch-<name>`), Block public access on, same region. Create prefix `batch/` (manifest at `batch/manifest.csv`, results under `batch/results/chunk-<index>/`).
+**2. Create S3 bucket** – S3 → Create bucket. Name (e.g. `storm-geo-batch-<name>`), Block public access on, same region. Create prefix `batch/` (manifest at `batch/manifest.csv`, results under `batch/results/<run-id>/chunk-<index>/`; each submitted job gets its own `<run-id>` subfolder automatically).
 
 **3. Create job role (container at runtime)** – IAM → Roles → Create role. Trusted entity: **Elastic Container Service** → **Elastic Container Service Task**. Create policy (JSON):
 
@@ -298,12 +298,22 @@ Use the same `REGION` and (if you use one) `AWS_PROFILE` as in your job definiti
 **One-time: confirm AWS and upload manifest**
 
 ```bash
+export REGION=your-region
+export AWS_PROFILE=your-profile
+export BUCKET=your-bucket
+export JOB_QUEUE=your-job-queue
+export ACCOUNT_ID=your-account-id
+
+# For me:
 export REGION=us-east-2
-export AWS_PROFILE=your-profile   # optional; omit to use default credentials
+export AWS_PROFILE=vitaly-aws
+export BUCKET=storm-geo-batch-hal
+export JOB_QUEUE=storm-geo-queue-public
+export ACCOUNT_ID=122997907744
 
-aws sts get-caller-identity --region "$REGION"
+aws sts get-caller-identity --region "$REGION" --profile "$AWS_PROFILE"
 
-aws s3 cp manifest.csv s3://YOUR_BUCKET/batch/manifest.csv --region "$REGION"
+aws s3 cp manifest.csv s3://$BUCKET/batch/manifest.csv --region "$REGION" --profile "$AWS_PROFILE"
 ```
 
 **Run a single job (one chunk, good for testing)**
@@ -311,34 +321,36 @@ aws s3 cp manifest.csv s3://YOUR_BUCKET/batch/manifest.csv --region "$REGION"
 ```bash
 aws batch submit-job \
   --job-name storm-geo-test-$(date +%s) \
-  --job-queue your-job-queue \
+  --job-queue "$JOB_QUEUE" \
   --job-definition storm-geo-batch-chunk \
-  --region "$REGION"
+  --region "$REGION" --profile "$AWS_PROFILE"
 ```
 
-Save the returned `jobId` to check status and logs.
+Save the returned `jobId`; results go to `s3://YOUR_BUCKET/batch/results/<jobId>/chunk-0/` (each job gets its own subfolder automatically).
 
 **Run an array (many chunks in parallel)**
 
 ```bash
 aws batch submit-job \
   --job-name storm-geo-array-$(date +%s) \
-  --job-queue your-job-queue \
+  --job-queue "$JOB_QUEUE" \
   --job-definition storm-geo-batch-chunk \
   --array-properties size=5 \
-  --region "$REGION"
+  --region "$REGION" --profile "$AWS_PROFILE"
 ```
 
 **Inspect jobs and results**
 
 ```bash
-aws batch list-jobs --job-queue your-job-queue --job-status RUNNING --region "$REGION"
-aws batch list-jobs --job-queue your-job-queue --job-status SUCCEEDED --region "$REGION"
+aws batch list-jobs --job-queue $JOB_QUEUE --job-status RUNNING --region "$REGION" --profile "$AWS_PROFILE"
+aws batch list-jobs --job-queue $JOB_QUEUE --job-status SUCCEEDED --region "$REGION" --profile "$AWS_PROFILE"
 
-aws batch describe-jobs --jobs JOB_ID --region "$REGION"
+aws batch describe-jobs --jobs $JOB_ID --region "$REGION" --profile "$AWS_PROFILE"
 
-aws s3 ls s3://YOUR_BUCKET/batch/results/ --region "$REGION"
-aws s3 ls s3://YOUR_BUCKET/batch/results/chunk-0/ --region "$REGION"
+aws s3 ls s3://$BUCKET/batch/results/ --region "$REGION" --profile "$AWS_PROFILE"
+# List chunks for a specific run (run ID = job ID from submit, or BATCH_RUN_PREFIX if set)
+aws s3 ls s3://$BUCKET/batch/results/RUN_ID/ --region "$REGION" --profile "$AWS_PROFILE"
+aws s3 ls s3://$BUCKET/batch/results/RUN_ID/chunk-0/ --region "$REGION" --profile "$AWS_PROFILE"
 ```
 
 **View logs (CloudWatch)**
@@ -349,20 +361,20 @@ From `describe-jobs` output, use the job’s `container.logStreamName` (and the 
 aws logs get-log-events \
   --log-group-name /aws/batch/job \
   --log-stream-name "LOG_STREAM_NAME_FROM_DESCRIBE_JOBS" \
-  --region "$REGION"
+  --region "$REGION" --profile "$AWS_PROFILE"
 ```
 
 Or in the console: Batch → Jobs → job name → Log stream.
 
 **If something isn’t set up**
 
-- **Job queue name** – List queues: `aws batch describe-job-queues --region "$REGION" --query 'jobQueues[*].jobQueueName'`
+- **Job queue name** – List queues: `aws batch describe-job-queues --region "$REGION" --query 'jobQueues[*].jobQueueName' --profile "$AWS_PROFILE"`
 - **ECR and image** – Build and push so the job definition’s image URI exists:
   ```bash
   docker build -f infra/Dockerfile.batch -t storm-geo-batch .
-  aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com
-  docker tag storm-geo-batch:latest ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/storm-geo-batch:latest
-  docker push ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/storm-geo-batch:latest
+  aws ecr get-login-password --region "$REGION" --profile "$AWS_PROFILE" | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
+  docker tag storm-geo-batch:latest $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/storm-geo-batch:latest
+  docker push $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/storm-geo-batch:latest
   ```
 - **Secret** – The job definition references a Secrets Manager secret (e.g. `storm-geo-secrets`). Ensure that secret exists in the same region and contains the keys your app expects (e.g. `OPENAI_API_KEY`, `GOOGLE_SEARCH_API_KEY`, `GOOGLE_CSE_ID`).
 
@@ -550,7 +562,22 @@ Use the same job definition and image; only the queue points at the new compute 
 
 ## Results in S3
 
-Each chunk uploads to `s3://BUCKET/batch/results/chunk-<index>/` (per-job `question_id/` dirs and `chunk_summary.json`). Optionally merge into a flat `s3://BUCKET/batch/results/<question_id>/`.
+Each submitted job gets a unique run folder so runs do not overwrite each other. Run ID is the Batch job ID (for array jobs, the part before `:array-index`) unless overridden. Layout:
+
+- `s3://BUCKET/batch/results/<run-id>/chunk-<index>/` – per chunk: `question_id/` dirs and `chunk_summary.json`.
+
+To use a custom run prefix (e.g. timestamp or name), pass it when submitting:
+
+```bash
+aws batch submit-job \
+  --job-name storm-geo-test \
+  --job-queue your-job-queue \
+  --job-definition storm-geo-batch-chunk \
+  --container-overrides '{"environment":[{"name":"BATCH_RUN_PREFIX","value":"run-20250202-143000"}]}' \
+  --region "$REGION"
+```
+
+For array jobs, set `BATCH_RUN_PREFIX` the same way so all chunks go under one run folder.
 
 ---
 
