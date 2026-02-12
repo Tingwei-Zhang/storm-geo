@@ -689,6 +689,10 @@ class WebPageHelper:
         except httpx.HTTPError as exc:
             print(f"Error while requesting {exc.request.url!r} - {exc!r}")
             return None
+        except Exception as exc:
+            # Catch-all so this never propagates (e.g. from thread pool); 403 etc. stay non-fatal
+            print(f"Error while requesting {url!r} - {exc!r}")
+            return None
 
     def urls_to_articles(self, urls: List[str]) -> Dict:
         with concurrent.futures.ThreadPoolExecutor(

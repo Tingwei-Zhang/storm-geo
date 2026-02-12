@@ -9,6 +9,7 @@ Skips if output already exists. Sanitizes question_id for filesystem safety.
 
 from __future__ import annotations
 
+import faulthandler
 import json
 import os
 import re
@@ -17,6 +18,10 @@ import tempfile
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import List, Optional
+
+# Ensure stderr is unbuffered so errors appear immediately and enable faulthandler
+sys.stderr.reconfigure(line_buffering=True)
+faulthandler.enable()  # dump Python traceback on fatal signals (e.g., segfault)
 
 # Import create_information_from_dict from manual_examples (same format as manual doc JSON).
 # Run from project root with PYTHONPATH=. so examples.manual_examples is resolvable.
@@ -150,10 +155,13 @@ def build_retriever(
     """Build retriever: base_rm, optionally FirstRetrievalInjector, then LoggingRetriever."""
     retriever_name = retriever_name or "google"
     if retriever_name == "google":
+        # Limit webpage helper concurrency to reduce risk of SSL/memory issues under high load.
+        webpage_threads = int(os.getenv("STORM_WEBPAGE_MAX_THREADS", "2"))
         base_rm = GoogleSearch(
             google_search_api_key=os.getenv("GOOGLE_SEARCH_API_KEY"),
             google_cse_id=os.getenv("GOOGLE_CSE_ID"),
             k=retrieve_top_k,
+            webpage_helper_max_threads=webpage_threads,
         )
     elif retriever_name == "bing":
         base_rm = BingSearch(
@@ -257,12 +265,19 @@ def run_single_query(
         moderator_override_N_consecutive_answering_turn=moderator_override_N_consecutive_answering_turn,
         node_expansion_trigger_count=node_expansion_trigger_count,
     )
-    rm = build_retriever(
-        retriever_name=retriever,
-        retrieve_top_k=runner_argument.retrieve_top_k,
-        manual_docs=manual_docs,
-        logging_wrapper=logging_wrapper,
-    )
+    try:
+        rm = build_retriever(
+            retriever_name=retriever,
+            retrieve_top_k=runner_argument.retrieve_top_k,
+            manual_docs=manual_docs,
+            logging_wrapper=logging_wrapper,
+        )
+    except Exception as e:
+        import sys
+        print(f"ERROR: Failed to build retriever '{retriever}': {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        raise
     costorm_runner = CoStormRunner(
         lm_config=lm_config,
         runner_argument=runner_argument,

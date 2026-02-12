@@ -9,6 +9,7 @@ with success/failure counts and failed question_ids, then uploads output_dir to 
 from __future__ import annotations
 
 import csv
+import faulthandler
 import json
 import re
 import sys
@@ -16,6 +17,10 @@ import tempfile
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import Any
+
+# Ensure stderr is unbuffered so errors appear immediately and enable faulthandler
+sys.stderr.reconfigure(line_buffering=True)
+faulthandler.enable()  # dump Python traceback on fatal signals (e.g., segfault)
 
 # Optional S3
 try:
@@ -142,7 +147,11 @@ def run_chunk(
             )
             success_count += 1
         except Exception as e:
-            failed.append({"question_id": qid, "error": str(e)})
+            import traceback
+            error_msg = f"{type(e).__name__}: {str(e)}"
+            print(f"ERROR processing {qid}: {error_msg}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+            failed.append({"question_id": qid, "error": error_msg})
 
     summary = {
         "total": len(rows),
@@ -156,6 +165,7 @@ def run_chunk(
 
 
 def main() -> int:
+    print("Starting run_chunk...", file=sys.stderr)
     parser = ArgumentParser(
         description="Run a chunk of manifest rows through Co-STORM and upload to S3."
     )
@@ -228,6 +238,7 @@ def main() -> int:
         print("No rows in chunk.", file=sys.stderr)
         return 0
 
+    print(f"Processing {len(rows)} rows in chunk...", file=sys.stderr)
     summary = run_chunk(
         rows,
         args.output_dir,
@@ -266,4 +277,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as e:
+        import traceback
+        print(f"FATAL ERROR in run_chunk: {type(e).__name__}: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)

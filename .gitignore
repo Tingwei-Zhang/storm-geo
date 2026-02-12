@@ -23,6 +23,7 @@ build/
 
 # Project-specific
 secrets.toml
+manifest.csv
 *.log
 */assertion.log
 *results/

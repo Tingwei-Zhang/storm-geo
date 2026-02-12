@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 from typing import Callable, List, Union
 
 import backoff
@@ -982,6 +983,9 @@ class TavilySearchRM(dspy.Retrieve):
 
 
 class GoogleSearch(dspy.Retrieve):
+    # Class-level lock to serialize Google API calls (httplib2/SSL is not thread-safe)
+    _api_lock = threading.Lock()
+
     def __init__(
         self,
         google_search_api_key=None,
@@ -1068,15 +1072,17 @@ class GoogleSearch(dspy.Retrieve):
 
         for query in queries:
             try:
-                response = (
-                    self.service.cse()
-                    .list(
-                        q=query,
-                        cx=self.google_cse_id,
-                        num=self.k,
+                # Serialize API calls to prevent SSL/httplib2 thread-safety issues
+                with GoogleSearch._api_lock:
+                    response = (
+                        self.service.cse()
+                        .list(
+                            q=query,
+                            cx=self.google_cse_id,
+                            num=self.k,
+                        )
+                        .execute()
                     )
-                    .execute()
-                )
 
                 for item in response.get("items", []):
                     if (

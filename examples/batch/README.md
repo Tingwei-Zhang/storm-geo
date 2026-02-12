@@ -533,10 +533,10 @@ Repeat until it returns `VALID`.
 **7. Create job queue for this compute environment**
 
 ```bash
-export JOB_QUEUE_NAME=storm-geo-queue-public
+export JOB_QUEUE=storm-geo-queue-public
 
 aws batch create-job-queue \
-  --job-queue-name "$JOB_QUEUE_NAME" \
+  --job-queue-name "$JOB_QUEUE" \
   --state ENABLED \
   --priority 1 \
   --compute-environment-order "order=1,computeEnvironment=$COMPUTE_ENV_NAME" \
@@ -550,10 +550,11 @@ aws batch create-job-queue \
 ```bash
 aws batch submit-job \
   --job-name storm-geo-test \
-  --job-queue "$JOB_QUEUE_NAME" \
+  --job-queue "$JOB_QUEUE" \
   --job-definition storm-geo-batch-chunk \
   --profile "$AWS_PROFILE" \
   --region "$REGION"
+  # --container-overrides '{"environment":[{"name":"envvar","value":"123"}]}'
 ```
 
 Use the same job definition and image; only the queue points at the new compute environment. Tasks run in public subnets with a public IP and can reach Secrets Manager, ECR, and S3.
