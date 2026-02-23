@@ -80,9 +80,18 @@ python -m examples.batch.run_single_query \
 python -m examples.batch.run_single_query \
   --manifest-row ./one_row.csv \
   --output-dir ./results
+
+# With UGC URL replacement (injection JSON: url -> doc)
+python -m examples.batch.run_single_query \
+  --question-id health_124 \
+  --topic "Why is sitting for long periods unhealthy?" \
+  --ugc-injection-path ./ugc_out/injection_health_85.json \
+  --output-dir ./results
 ```
 
 Output: `./results/<sanitized_question_id>/report.md`, `instance_dump.json`, `log.json`. Skips if output exists unless `--no-skip-existing`.
+
+**UGC manifest:** If a manifest row includes `ugc_injection_path` (path to a JSON mapping URL → document), retrieval results for those URLs are replaced with the injected content. See [UGC injection](../ugc_injections/README.md) for the full workflow.
 
 ---
 
@@ -103,9 +112,15 @@ python -m examples.batch.run_chunk \
   --start-index 0 \
   --end-index 50 \
   --output-dir ./chunk_results
+
+# UGC manifest: relative ugc_injection_path resolved from manifest dir (or --injection-base-dir when using --manifest-s3)
+python -m examples.batch.run_chunk \
+  --manifest ./ugc_out/manifest.csv \
+  --chunk-id 0 --chunk-size 100 \
+  --output-dir ./ugc_out/chunk_0
 ```
 
-Writes `chunk_summary.json` (success_count, failure_count, failed list) and uploads to S3 if `--upload-s3` is set.
+Writes `chunk_summary.json` (success_count, failure_count, failed list) and uploads to S3 if `--upload-s3` is set. When the manifest has a `ugc_injection_path` column, each row’s path is resolved (relative to the manifest directory, or to `--injection-base-dir` when using `--manifest-s3`) and the loaded JSON is used for URL replacement.
 
 ---
 
@@ -117,9 +132,22 @@ python -m examples.batch.run_local_parallel \
   --output-dir ./results \
   --workers 4 \
   --upload-s3 s3://YOUR_BUCKET/batch/results/
+
+# UGC manifest (e.g. from examples/ugc_injections/build_ugc_dataset.py)
+python -m examples.batch.run_local_parallel \
+  --manifest ./ugc_out/manifest.csv \
+  --output-dir ./ugc_out/runs \
+  --workers 4
+
+# Manifest from S3 with UGC: pass --injection-base-dir so relative ugc_injection_path resolves
+python -m examples.batch.run_local_parallel \
+  --manifest-s3 s3://YOUR_BUCKET/manifest.csv \
+  --injection-base-dir ./ugc_out \
+  --output-dir ./results \
+  --workers 4
 ```
 
-Same output layout; writes `parallel_summary.json`.
+Same output layout; writes `parallel_summary.json`. Rows with `ugc_injection_path` use that JSON for URL replacement; relative paths are resolved from the manifest directory (or `--injection-base-dir` when using `--manifest-s3`).
 
 ---
 

@@ -25,12 +25,14 @@ except ImportError:
     HAS_BOTO3 = False
 
 from .run_chunk import load_manifest_rows, upload_dir_to_s3
-from .run_single_query import run_single_query
+from .run_single_query import load_ugc_replacement_map, run_single_query
 
 
 def _run_one(
     row: dict,
     output_dir: str,
+    injection_base_dir: Optional[str],
+    ugc_injection_mode: str,
     retriever: str,
     demo_turns: int,
     retrieve_top_k: int,
@@ -58,6 +60,16 @@ def _run_one(
         return (qid or "unknown", "missing question_id or topic")
     injection_path = (row.get("injection_doc_path") or "").strip() or None
     injection_s3 = (row.get("injection_doc_s3_uri") or "").strip() or None
+    url_replacement_map = None
+    ugc_path_str = (row.get("ugc_injection_path") or "").strip()
+    if ugc_path_str:
+        ugc_path = Path(ugc_path_str).expanduser()
+        if not ugc_path.is_absolute() and injection_base_dir:
+            ugc_path = (Path(injection_base_dir) / ugc_path).resolve()
+        else:
+            ugc_path = ugc_path.resolve()
+        if ugc_path.exists():
+            url_replacement_map = load_ugc_replacement_map(ugc_path)
     try:
         run_single_query(
             question_id=qid,
@@ -65,6 +77,8 @@ def _run_one(
             output_dir=Path(output_dir),
             injection_doc_path=injection_path,
             injection_doc_s3_uri=injection_s3,
+            url_replacement_map=url_replacement_map,
+            url_replacement_first_only=(ugc_injection_mode == "first_only"),
             retriever=retriever,
             demo_turns=demo_turns,
             retrieve_top_k=retrieve_top_k,
@@ -92,6 +106,8 @@ def run_local_parallel(
     output_dir: Path,
     workers: int = 4,
     *,
+    injection_base_dir: Optional[Path] = None,
+    ugc_injection_mode: str = "replace_all",
     retriever: str = "google",
     demo_turns: int = 2,
     retrieve_top_k: int = 3,
@@ -115,11 +131,14 @@ def run_local_parallel(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     out_str = str(output_dir.resolve())
+    injection_base_str = str(injection_base_dir.resolve()) if injection_base_dir else None
 
     def _args_for_row(row: dict) -> tuple:
         return (
             row,
             out_str,
+            injection_base_str,
+            ugc_injection_mode,
             retriever,
             demo_turns,
             retrieve_top_k,
@@ -169,6 +188,19 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument(
+        "--injection-base-dir",
+        type=Path,
+        default=None,
+        help="Base dir to resolve relative ugc_injection_path (e.g. when manifest is from S3).",
+    )
+    parser.add_argument(
+        "--ugc-injection-mode",
+        type=str,
+        choices=["replace_all", "first_only"],
+        default="replace_all",
+        help="replace_all: replace every matching URL. first_only: general UGC mode, replace only the first matching UGC result.",
+    )
+    parser.add_argument(
         "--upload-s3",
         type=str,
         default=None,
@@ -201,10 +233,16 @@ def main() -> int:
         print("No rows in manifest.", file=sys.stderr)
         return 0
 
+    injection_base_dir = args.injection_base_dir
+    if injection_base_dir is None and args.manifest is not None:
+        injection_base_dir = args.manifest.resolve().parent
+
     summary = run_local_parallel(
         rows,
         args.output_dir,
         workers=args.workers,
+        injection_base_dir=injection_base_dir,
+        ugc_injection_mode=args.ugc_injection_mode,
         retriever=args.retriever,
         demo_turns=args.demo_turns,
         retrieve_top_k=args.retrieve_top_k,

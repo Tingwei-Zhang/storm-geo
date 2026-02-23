@@ -17,7 +17,7 @@ import sys
 import tempfile
 from argparse import ArgumentParser
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 # Ensure stderr is unbuffered so errors appear immediately and enable faulthandler
 sys.stderr.reconfigure(line_buffering=True)
@@ -38,6 +38,11 @@ from knowledge_storm.rm import (BingSearch, BraveRM, DuckDuckGoSearchRM,
 from knowledge_storm.utils import load_api_key
 
 from ._injector import FirstRetrievalInjector
+
+try:
+    from examples.ugc_injections.url_replacement_injector import UrlReplacementInjector
+except ModuleNotFoundError:
+    UrlReplacementInjector = None  # type: ignore[misc, assignment]
 
 
 def sanitize_question_id(question_id: str) -> str:
@@ -97,6 +102,15 @@ def load_injection_docs(
     return []
 
 
+def load_ugc_replacement_map(path: Path) -> Dict[str, Any]:
+    """Load UGC injection JSON: url -> {url, title, description, snippets}."""
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
 def configure_models(lm_preset: str = "demo") -> CollaborativeStormLMConfigs:
     """Configure LM (demo = gpt-4o-mini for all; gpt = gpt-4o for main components)."""
     load_api_key(toml_file_path="secrets.toml")
@@ -151,8 +165,10 @@ def build_retriever(
     retrieve_top_k: int,
     manual_docs: List[Information],
     logging_wrapper: Optional[LoggingWrapper],
+    url_replacement_map: Optional[Dict[str, Any]] = None,
+    url_replacement_first_only: bool = False,
 ):
-    """Build retriever: base_rm, optionally FirstRetrievalInjector, then LoggingRetriever."""
+    """Build retriever: base_rm, optionally FirstRetrievalInjector, optionally UrlReplacementInjector, then LoggingRetriever."""
     retriever_name = retriever_name or "google"
     if retriever_name == "google":
         # Limit webpage helper concurrency to reduce risk of SSL/memory issues under high load.
@@ -205,6 +221,10 @@ def build_retriever(
         )
     if manual_docs:
         base_rm = FirstRetrievalInjector(base_rm, manual_docs)
+    if url_replacement_map and UrlReplacementInjector is not None:
+        base_rm = UrlReplacementInjector(
+            base_rm, url_replacement_map, replace_first_only=url_replacement_first_only
+        )
     if logging_wrapper is not None:
         return LoggingRetriever(base_rm, logging_wrapper)
     return base_rm
@@ -217,6 +237,8 @@ def run_single_query(
     *,
     injection_doc_path: Optional[str] = None,
     injection_doc_s3_uri: Optional[str] = None,
+    url_replacement_map: Optional[Dict[str, Any]] = None,
+    url_replacement_first_only: bool = False,
     retriever: str = "google",
     demo_turns: int = 2,
     retrieve_top_k: int = 3,
@@ -271,6 +293,8 @@ def run_single_query(
             retrieve_top_k=runner_argument.retrieve_top_k,
             manual_docs=manual_docs,
             logging_wrapper=logging_wrapper,
+            url_replacement_map=url_replacement_map,
+            url_replacement_first_only=url_replacement_first_only,
         )
     except Exception as e:
         import sys
@@ -338,6 +362,19 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--injection-doc-path", type=str, default=None)
     parser.add_argument("--injection-doc-s3-uri", type=str, default=None)
+    parser.add_argument(
+        "--ugc-injection-path",
+        type=Path,
+        default=None,
+        help="Path to UGC injection JSON (url -> doc) for URL replacement.",
+    )
+    parser.add_argument(
+        "--ugc-injection-mode",
+        type=str,
+        choices=["replace_all", "first_only"],
+        default="replace_all",
+        help="replace_all: replace every retrieved URL in the injection map. first_only: general UGC mode, replace only the first matching UGC result.",
+    )
     parser.add_argument("--retriever", type=str, default="google")
     parser.add_argument("--demo-turns", type=int, default=2)
     parser.add_argument("--retrieve-top-k", type=int, default=3)
@@ -358,17 +395,27 @@ def main() -> int:
     parser.add_argument("--no-skip-existing", action="store_true", help="Run even if output exists.")
     args = parser.parse_args()
 
+    url_replacement_map = None
     if args.manifest_row is not None:
         row = parse_manifest_row(args.manifest_row)
         question_id = row.get("question_id") or args.question_id
         topic = row.get("topic") or args.topic
         injection_doc_path = row.get("injection_doc_path") or args.injection_doc_path
         injection_doc_s3_uri = row.get("injection_doc_s3_uri") or args.injection_doc_s3_uri
+        ugc_path_str = (row.get("ugc_injection_path") or "").strip()
+        if ugc_path_str:
+            ugc_path = Path(ugc_path_str).expanduser().resolve()
+            if ugc_path.exists():
+                url_replacement_map = load_ugc_replacement_map(ugc_path)
     else:
         question_id = args.question_id
         topic = args.topic
         injection_doc_path = args.injection_doc_path
         injection_doc_s3_uri = args.injection_doc_s3_uri
+    if args.ugc_injection_path is not None and args.ugc_injection_path.exists():
+        url_replacement_map = load_ugc_replacement_map(args.ugc_injection_path)
+
+    url_replacement_first_only = args.ugc_injection_mode == "first_only"
 
     if not question_id or not topic:
         print(
@@ -384,6 +431,8 @@ def main() -> int:
             output_dir=args.output_dir,
             injection_doc_path=injection_doc_path,
             injection_doc_s3_uri=injection_doc_s3_uri,
+            url_replacement_map=url_replacement_map,
+            url_replacement_first_only=url_replacement_first_only,
             retriever=args.retriever,
             demo_turns=args.demo_turns,
             retrieve_top_k=args.retrieve_top_k,

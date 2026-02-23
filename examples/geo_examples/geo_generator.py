@@ -5,13 +5,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable
 
-
 ModelCaller = Callable[[str], str]
 
 COMMON_SYSTEM_PROMPT = """You are an expert ml researcher having previous background in SEO and search engines in general. You are working on novel research ideas for next generation of products. These products will have language models augmented with search engines, with the task of answering questions based on sources backed by the search engine. This new set of systems will be collectively called language engines (generative search engines). This will require websites to update their SEO techniques to not only rank higher in searchs but also to influence the llm generated answer. Specifically they will use GEO (Generative Engine Optimization) techniques to boost their visibility in the final text answer outputted by the Language Engine.  
 """
 
-COMMON_USER_PROMPT_START = "General Instruction: I will give you a source of website source. As the owner of the source, the task is to increase your visibility in the answer. To do this you will appropriately change the text of the source (without changing the content) so that it is included and has hige impact in the final answer.\n\n"
+COMMON_USER_PROMPT_START = "General Instruction: I will give you a source of website source. As the owner of the source, the task is to increase your visibility in the answer. To do this you will appropriately change the text of the source (without changing the content) so that it is included and has huge impact in the final answer.\n\n"
 
 # Instruct the model to return only the optimized text, no preamble or labels.
 OUTPUT_ONLY_SOURCE = "\n\nYour response must contain only the rewritten source text and nothing else. Do not repeat the optimization goal, do not include \"Source:\", backticks, or any labels—output the optimized source only."
