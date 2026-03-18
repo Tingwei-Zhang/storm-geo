@@ -40,17 +40,39 @@ def load_openai_api_key_from_secrets():
 load_openai_api_key_from_secrets()
 
 try:
-    from examples.geo_examples.geo_generator import call_gpt
+    from examples.geo_examples.geo_generator import GEOMethod, call_gpt
 except ModuleNotFoundError:
     repo_root = Path(__file__).resolve().parents[2]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from examples.geo_examples.geo_generator import call_gpt  # type: ignore[no-redef]
+    from examples.geo_examples.geo_generator import (  # type: ignore[no-redef]
+        GEOMethod,
+        call_gpt,
+    )
 
-from examples.ugc_injections.config import (get_ugc_url_bases,
-                                            url_base_to_category)
+from examples.ugc_injections.config import get_ugc_url_bases, url_base_to_category
 from examples.ugc_injections.ugc_content_generator import (
-    UGCContentGenerator, content_to_snippet_doc)
+    UGCContentGenerator,
+    content_to_snippet_doc,
+)
+
+
+def parse_geo_methods(value: str) -> list[GEOMethod]:
+    """Parse comma-separated method names into 1 or 2 GEOMethod values."""
+    names = [s.strip().lower() for s in value.split(",") if s.strip()]
+    if not names or len(names) > 2:
+        raise ValueError(
+            "--geo-methods must be one or two comma-separated GEO method names."
+        )
+    valid = {m.value for m in GEOMethod}
+    out = []
+    for n in names:
+        if n not in valid:
+            raise ValueError(
+                f"Unknown GEO method: {n}. Valid: {sorted(valid)}."
+            )
+        out.append(GEOMethod(n))
+    return out
 
 
 def load_manifest(path: Path) -> list[dict]:
@@ -151,7 +173,43 @@ def main() -> int:
     )
     parser.add_argument("--model", type=str, default="gpt-4o-mini")
     parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument(
+        "--ugc-mode",
+        type=str,
+        choices=("classic", "geo_only", "content_style_plus_geo"),
+        default="classic",
+        help="classic: forum/encyclopedic/qa per url_base; "
+        "geo_only: source + 1 or 2 GEO methods; "
+        "content_style_plus_geo: UGC style then 1 or 2 GEO methods.",
+    )
+    parser.add_argument(
+        "--geo-methods",
+        type=str,
+        default=None,
+        help="One or two comma-separated GEO method names (e.g. general_attack or general_attack,fluency_optimization). Required for geo_only and content_style_plus_geo.",
+    )
+    parser.add_argument(
+        "--content-style",
+        type=str,
+        choices=("forum", "encyclopedic", "qa"),
+        default=None,
+        help="Required when --ugc-mode is content_style_plus_geo.",
+    )
     args = parser.parse_args()
+
+    if args.ugc_mode in ("geo_only", "content_style_plus_geo") and not args.geo_methods:
+        print("--geo-methods required for --ugc-mode geo_only and content_style_plus_geo.", file=sys.stderr)
+        return 1
+    if args.ugc_mode == "content_style_plus_geo" and not args.content_style:
+        print("--content-style required for --ugc-mode content_style_plus_geo.", file=sys.stderr)
+        return 1
+    geo_methods_list: list[GEOMethod] | None = None
+    if args.geo_methods:
+        try:
+            geo_methods_list = parse_geo_methods(args.geo_methods)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
 
     if not args.manifest.exists():
         print(f"Manifest not found: {args.manifest}", file=sys.stderr)
@@ -192,15 +250,30 @@ def main() -> int:
         for entry in url_entries:
             url = entry["url"]
             url_base = entry["url_base"]
-            category = url_base_to_category(url_base)
-            if not category:
-                continue
             try:
-                content = generator.generate(
-                    site_category=category,
-                    cluster_description=cluster_desc,
-                    product_content=product_content,
-                )
+                if args.ugc_mode == "classic":
+                    category = url_base_to_category(url_base)
+                    if not category:
+                        continue
+                    content = generator.generate(
+                        site_category=category,
+                        cluster_description=cluster_desc,
+                        product_content=product_content,
+                    )
+                elif args.ugc_mode == "geo_only":
+                    content = generator.generate_geo_only(
+                        product_content=product_content,
+                        cluster_description=cluster_desc,
+                        geo_methods=geo_methods_list,
+                    )
+                else:
+                    assert args.ugc_mode == "content_style_plus_geo"
+                    content = generator.generate_with_geo(
+                        site_category=args.content_style,
+                        cluster_description=cluster_desc,
+                        product_content=product_content,
+                        geo_methods=geo_methods_list,
+                    )
             except Exception as e:
                 print(
                     f"  Skip {url[:50]}...: {e}",

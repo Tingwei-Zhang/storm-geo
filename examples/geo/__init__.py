@@ -1,6 +1,6 @@
-"""Thin re-export from shared GEO module for backward compatibility."""
+"""Shared GEO (Generative Engine Optimization) module for geo_examples and ugc_injections."""
 
-from examples.geo import (
+from .geo_generator import (
     COMMON_SYSTEM_PROMPT,
     COMMON_USER_PROMPT_START,
     OUTPUT_ONLY_SOURCE,
@@ -9,6 +9,7 @@ from examples.geo import (
     GEORequest,
     GoalType,
     InjectionPosition,
+    ModelCaller,
     apply_geo_chain,
     call_gpt,
 )
@@ -18,10 +19,11 @@ __all__ = [
     "COMMON_USER_PROMPT_START",
     "OUTPUT_ONLY_SOURCE",
     "GEOGenerator",
-    "GEORequest",
     "GEOMethod",
+    "GEORequest",
     "GoalType",
     "InjectionPosition",
+    "ModelCaller",
     "apply_geo_chain",
     "call_gpt",
 ]

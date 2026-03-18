@@ -19,6 +19,7 @@ try:
         GEORequest,
         GEOMethod,
         GoalType,
+        apply_geo_chain,
         call_gpt,
     )
 except ModuleNotFoundError:
@@ -32,6 +33,7 @@ except ModuleNotFoundError:
         GEORequest,
         GEOMethod,
         GoalType,
+        apply_geo_chain,
         call_gpt,
     )
 
@@ -192,8 +194,27 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model", type=str, default="gpt-4o-mini")
     parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument(
+        "--geo-methods",
+        type=str,
+        default=None,
+        help="One or two comma-separated GEO method names (e.g. general_attack or general_attack,fluency_optimization). If omitted, uses GENERAL_ATTACK with optimize_full_snippet.",
+    )
     args = parser.parse_args()
     output_csv_path = with_unique_suffix(args.output_csv)
+
+    geo_methods_list: list[GEOMethod] | None = None
+    if args.geo_methods:
+        parts = [s.strip().lower() for s in args.geo_methods.split(",") if s.strip()]
+        if not parts or len(parts) > 2:
+            raise ValueError(
+                "--geo-methods must be one or two comma-separated GEO method names."
+            )
+        valid = {m.value for m in GEOMethod}
+        for p in parts:
+            if p not in valid:
+                raise ValueError(f"Unknown GEO method: {p}. Valid: {sorted(valid)}.")
+        geo_methods_list = [GEOMethod(p) for p in parts]
 
     if not args.manifest.exists():
         raise FileNotFoundError(f"manifest not found: {args.manifest}")
@@ -233,6 +254,9 @@ def main() -> int:
 
     output_rows: list[dict[str, str]] = []
     geo_counter = 1
+    methods_suffix = (
+        ",".join(m.value for m in geo_methods_list) if geo_methods_list else ""
+    )
 
     def build_entry(row: ManifestRow, goal_type: GoalType) -> None:
         nonlocal geo_counter
@@ -245,55 +269,77 @@ def main() -> int:
 
         if goal_type == GoalType.CONCEPT:
             reuse_key = f"concept:{row.domain}"
-            request = GEORequest(
-                raw_document=base["content"],
-                method=GEOMethod.GENERAL_ATTACK,
-                target=row.domain,
-                goal_type=GoalType.CONCEPT,
-            )
+            target = row.domain
+            queries = None
         elif goal_type == GoalType.QUERY_GROUP:
             reuse_key = f"query_group:{row.cluster_id}"
-            request = GEORequest(
-                raw_document=base["content"],
-                method=GEOMethod.GENERAL_ATTACK,
-                target="",
-                goal_type=GoalType.QUERY_GROUP,
-                queries=cluster_to_queries[row.cluster_id],
-            )
+            target = ""
+            queries = cluster_to_queries[row.cluster_id]
         else:
-            # single query (no reuse)
             reuse_key = f"single_query:{row.question_id}"
-            request = GEORequest(
-                raw_document=base["content"],
-                method=GEOMethod.GENERAL_ATTACK,
-                target=row.query,
-                goal_type=GoalType.SINGLE_QUERY,
-            )
+            target = row.query
+            queries = None
+
+        if geo_methods_list:
+            reuse_key = f"{reuse_key}:{methods_suffix}"
 
         if reuse_key in cache:
             geo_prompt, geo_content, geo_snippet_json = cache[reuse_key]
         else:
-            geo_prompt = generator._build_prompt(request)
-            optimized_snippet = optimize_full_snippet(
-                base_snippet=base,
-                geo_prompt=geo_prompt,
-                model=args.model,
-                temperature=args.temperature,
-            )
-            geo_content = optimized_snippet["content"]
-            geo_snippet_json = json.dumps(optimized_snippet, ensure_ascii=False)
-            cache[reuse_key] = (geo_prompt, geo_content, geo_snippet_json)
+            if geo_methods_list:
+                geo_content = apply_geo_chain(
+                    generator,
+                    source_text=base["content"],
+                    methods=geo_methods_list,
+                    target=target,
+                    goal_type=goal_type,
+                    queries=queries,
+                )
+                optimized_snippet = {
+                    "url": base["url"],
+                    "title": base["title"],
+                    "description": base["description"],
+                    "content": geo_content,
+                }
+                geo_snippet_json = json.dumps(optimized_snippet, ensure_ascii=False)
+                first_request = GEORequest(
+                    raw_document=base["content"],
+                    method=geo_methods_list[0],
+                    target=target,
+                    goal_type=goal_type,
+                    queries=queries,
+                )
+                geo_prompt = generator._build_prompt(first_request)
+                cache[reuse_key] = (geo_prompt, geo_content, geo_snippet_json)
+            else:
+                request = GEORequest(
+                    raw_document=base["content"],
+                    method=GEOMethod.GENERAL_ATTACK,
+                    target=target,
+                    goal_type=goal_type,
+                    queries=queries,
+                )
+                geo_prompt = generator._build_prompt(request)
+                optimized_snippet = optimize_full_snippet(
+                    base_snippet=base,
+                    geo_prompt=geo_prompt,
+                    model=args.model,
+                    temperature=args.temperature,
+                )
+                geo_content = optimized_snippet["content"]
+                geo_snippet_json = json.dumps(optimized_snippet, ensure_ascii=False)
+                cache[reuse_key] = (geo_prompt, geo_content, geo_snippet_json)
 
+        geo_method_str = methods_suffix or GEOMethod.GENERAL_ATTACK.value
         output_rows.append(
             {
                 "geo_id": f"geo_{geo_counter}",
                 "question_id": row.question_id,
                 "cluster_id": row.cluster_id,
                 "query": row.query,
-                "geo_method": GEOMethod.GENERAL_ATTACK.value,
+                "geo_method": geo_method_str,
                 "goal_type": goal_type.value,
                 "geo_prompt": geo_prompt,
-                # Store full snippet JSON string so downstream can directly write/use it.
                 "geo_document": geo_snippet_json,
             }
         )

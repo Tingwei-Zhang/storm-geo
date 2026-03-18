@@ -1,12 +1,32 @@
 """
 UGC-style content generator for forum, encyclopedic, and Q&A formats.
-Integrates GENERAL_ATTACK principles: citation focus, explicit mention, no generic content.
+Supports classic UGC, GEO-only (source + 1 or 2 GEO methods), and content_style + GEO.
 """
 
 from __future__ import annotations
 
 import re
+import sys
+from pathlib import Path
 from typing import Callable
+
+try:
+    from examples.geo import (
+        GEOGenerator,
+        GEOMethod,
+        GoalType,
+        apply_geo_chain,
+    )
+except ModuleNotFoundError:
+    _repo_root = Path(__file__).resolve().parents[2]
+    if str(_repo_root) not in sys.path:
+        sys.path.insert(0, str(_repo_root))
+    from examples.geo import (  # type: ignore[no-redef]
+        GEOGenerator,
+        GEOMethod,
+        GoalType,
+        apply_geo_chain,
+    )
 
 # Preamble: tie the injection document (product) to the cluster so the model promotes it
 PRODUCT_BLOCK = (
@@ -117,6 +137,63 @@ class UGCContentGenerator:
         user_prompt = f"{preamble}\n\n{prompt_body}"
         raw = self.model_call(user_prompt)
         return _strip_code_fence(raw) if raw else ""
+
+    def generate_geo_only(
+        self,
+        product_content: str,
+        cluster_description: str,
+        geo_methods: list[GEOMethod],
+    ) -> str:
+        """
+        Apply one or two GEO methods in sequence to the product/source document.
+        No forum/encyclopedic/qa wrapper. Deterministic chain in order given.
+        """
+        if not geo_methods:
+            raise ValueError("geo_methods must contain one or two GEOMethod values.")
+        if len(geo_methods) > 2:
+            raise ValueError("geo_methods must contain at most two GEOMethod values.")
+        source = (product_content or "").strip() or "(No product description provided.)"
+        if len(source) > 600:
+            source = source[:597] + "..."
+        generator = GEOGenerator(model_call=self.model_call)
+        out = apply_geo_chain(
+            generator,
+            source_text=source,
+            methods=geo_methods,
+            target=cluster_description,
+            goal_type=GoalType.CONCEPT,
+        )
+        return _strip_code_fence(out) if out else ""
+
+    def generate_with_geo(
+        self,
+        site_category: str,
+        cluster_description: str,
+        product_content: str,
+        geo_methods: list[GEOMethod],
+    ) -> str:
+        """
+        First generate UGC with the given content style (forum/encyclopedic/qa),
+        then apply one or two GEO methods in sequence to that text. Deterministic.
+        """
+        if not geo_methods:
+            raise ValueError("geo_methods must contain one or two GEOMethod values.")
+        if len(geo_methods) > 2:
+            raise ValueError("geo_methods must contain at most two GEOMethod values.")
+        ugc_text = self.generate(
+            site_category=site_category,
+            cluster_description=cluster_description,
+            product_content=product_content,
+        )
+        generator = GEOGenerator(model_call=self.model_call)
+        out = apply_geo_chain(
+            generator,
+            source_text=ugc_text,
+            methods=geo_methods,
+            target=cluster_description,
+            goal_type=GoalType.CONCEPT,
+        )
+        return _strip_code_fence(out) if out else ""
 
 
 def _product_name_from_content(content: str) -> str:

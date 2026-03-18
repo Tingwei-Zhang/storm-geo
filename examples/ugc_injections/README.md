@@ -92,3 +92,77 @@ The output manifest has the same columns as the source plus:
 - **ugc_injection_path** – Relative path to `injection_{domain}_{cluster_id}.json` when that cluster has UGC injections; empty otherwise.
 
 Rows with empty `ugc_injection_path` run as normal (no URL replacement).
+
+---
+
+## Grouped pipeline (_grouped)
+
+When your source is **grouped_ugc_clusters.csv** (columns: `group_name`, `query_template`, `filled_query`, `ugc_url`, `ugc_domain`, `cluster_id`, …), use the _grouped pipeline:
+
+1. **Create base experiment config** – Manifest with a subsample (selected group names), no injections.
+2. **Run with no injections** – Co-STORM baseline.
+3. **Generate injection documents** – Build `injection_{group}.json` per group using `examples.geo` / UGC generator.
+4. **Run with injections** – Same manifest with `ugc_injection_path` set and `--injection-base-dir`.
+
+### 1. Build manifest (base: no injections)
+
+From project root:
+
+```bash
+python -m examples.ugc_injections.build_grouped_manifest \
+  --grouped-csv /Users/haltriedman/code/seo-geo/clustering_results/serp_clusters/grouped_ugc_clusters.csv \
+  --group-names "401k early withdrawal" "AAA alternative" \
+  --output-dir experiment_config/base_grouped
+```
+
+Writes `experiment_config/base_grouped/manifest.csv` with `question_id`, `topic` (= `filled_query`), and **empty** `ugc_injection_path`.
+
+### 2. Run baseline (no injections)
+
+```bash
+python -m examples.batch.run_local_parallel \
+  --manifest experiment_config/base_grouped/manifest.csv \
+  --output-dir results/base_grouped \
+  --workers 4
+```
+
+### 3. Generate injection JSONs
+
+Uses the same group names and writes `injection_{group}.json` into the **same** output dir (or a separate one for “with injections”):
+
+```bash
+python -m examples.ugc_injections.build_grouped_injections \
+  --grouped-csv /Users/haltriedman/code/seo-geo/clustering_results/serp_clusters/grouped_ugc_clusters.csv \
+  --group-names "401k early withdrawal" "AAA alternative" \
+  --output-dir experiment_config/classic_grouped \
+  --products examples/geo_examples/manual_document_example.json \
+  --ugc-mode classic
+```
+
+Optional: `--ugc-mode geo_only --geo-methods general_attack` or `content_style_plus_geo` with `--content-style forum --geo-methods ...`.
+
+### 4. Build manifest with injection paths and run
+
+```bash
+python -m examples.ugc_injections.build_grouped_manifest \
+  --grouped-csv /Users/haltriedman/code/seo-geo/clustering_results/serp_clusters/grouped_ugc_clusters.csv \
+  --group-names "401k early withdrawal" "AAA alternative" \
+  --output-dir experiment_config/classic_grouped \
+  --with-injection-path
+```
+
+Then run with injections (use `--injection-base-dir` so relative `ugc_injection_path` resolves):
+
+```bash
+python -m examples.batch.run_local_parallel \
+  --manifest experiment_config/classic_grouped/manifest.csv \
+  --output-dir results/classic_grouped \
+  --injection-base-dir experiment_config/classic_grouped \
+  --workers 4 \
+  --ugc-injection-mode replace_all
+```
+
+### Grouped scripts
+
+- **build_grouped_manifest.py** – From `grouped_ugc_clusters.csv`, filter by `--group-names`, write manifest with `question_id`, `topic` (= `filled_query`). Use `--with-injection-path` to set `ugc_injection_path` to `injection_{group}.json`.
+- **build_grouped_injections.py** – For each group, unique `ugc_url`s; generate UGC or GEO content per URL (group name = cluster description, products JSON = source); write `injection_{group}.json`.

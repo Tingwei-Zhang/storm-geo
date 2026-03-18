@@ -4,7 +4,7 @@ Maps url_base from recurring_urls_raw.csv to content style: forum, encyclopedic,
 """
 
 UGC_SITE_CATEGORIES = {
-    "forum": ["reddit.com"],
+    "forum": ["reddit.com", "youtube.com", "facebook.com"],
     "encyclopedic": ["en.wikipedia.org"],
     "qa": [
         "law.stackexchange.com",
